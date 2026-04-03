@@ -72,6 +72,12 @@ button:hover { background:#27ae60;}
 <input id="search" placeholder="City or lon,lat"/>
 <button onclick="searchLocation()">Search</button>
 
+<h3>Overpass Provider</h3>
+<select id="providerSelect">
+<option value="https://lz4.overpass-api.de/api/interpreter">lz4.overpass-api.de</option>
+<option value="https://overpass.kumi.systems/api/interpreter">kumi.systems</option>
+</select>
+
 <h3>Core Filters</h3>
 <label><input type="checkbox" id="oneway"> Oneway</label><br>
 <label><input type="checkbox" id="speed"> Speed Limits</label><br>
@@ -113,6 +119,7 @@ button:hover { background:#27ae60;}
 <button onclick="clearMap()">Clear</button>
 <button onclick="exportGeoJSON()">Export</button>
 <button onclick="locateMe()">Locate Me</button>
+<button id="cancelBtn" onclick="cancelQuery()" disabled>Cancel Query</button>
 
 <div class="stat">Edits: <span id="count">0</span></div>
 </div>
@@ -136,6 +143,7 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl());
 
 let currentData=null;
+let abortController = null;
 
 function showLoader(){ document.getElementById("loader").style.display="flex"; }
 function hideLoader(){ document.getElementById("loader").style.display="none"; }
@@ -205,11 +213,6 @@ function clearMap(){
   count.innerText=0;
 }
 
-const overpassEndpoints = [
-  "https://lz4.overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter"
-];
-
 async function runQuery(){
   const bounds = map.getBounds();
   if(bounds.getNorth()-bounds.getSouth() > 0.5 || bounds.getEast()-bounds.getWest() > 0.5){
@@ -219,14 +222,25 @@ async function runQuery(){
 
   clearMap();
   showLoader();
-  console.log(buildQuery());
+  cancelBtn.disabled = false;
+  abortController = new AbortController();
 
-  let data=null;
-  for(let endpoint of overpassEndpoints){
+  const primaryEndpoint = providerSelect.value;
+  const fallbackEndpoints = [
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter"
+  ].filter(ep => ep !== primaryEndpoint);
+
+  const endpoints = [primaryEndpoint, ...fallbackEndpoints];
+  let data = null;
+
+  for(let endpoint of endpoints){
     try{
       const res = await fetch(endpoint,{
         method:"POST",
-        body:buildQuery()
+        body: buildQuery(),
+        signal: abortController.signal
       });
 
       const contentType = res.headers.get("content-type");
@@ -239,13 +253,20 @@ async function runQuery(){
       if(data) break;
 
     } catch(e){
+      if(e.name === "AbortError"){
+        console.log("Query cancelled");
+        hideLoader();
+        cancelBtn.disabled = true;
+        return;
+      }
       console.warn(`Failed endpoint ${endpoint}: ${e}`);
     }
   }
 
   if(!data){
-    alert("All Overpass endpoints failed or returned invalid data. Try zooming in or later.");
+    alert("All Overpass endpoints failed. Try zooming in or later.");
     hideLoader();
+    cancelBtn.disabled = true;
     return;
   }
 
@@ -273,6 +294,15 @@ async function runQuery(){
 
   addClick();
   hideLoader();
+  cancelBtn.disabled = true;
+}
+
+function cancelQuery(){
+  if(abortController){
+    abortController.abort();
+    cancelBtn.disabled = true;
+    hideLoader();
+  }
 }
 
 function toPoints(geo){
