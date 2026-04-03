@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Nav Data Monitor PRO</title>
+<title>nav-data-monitor</title>
 
 <link href="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.css" rel="stylesheet"/>
 <script src="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.js"></script>
@@ -178,11 +178,11 @@ function buildQuery(){
   if(parts.length===0) parts.push(`way["highway"]`);
 
   return `
-  [out:json][timeout:25];
-  (
-    ${parts.map(p=>`${p}(newer:"${t}")(${bbox()});`).join("\n")}
-  );
-  out body;>;out skel qt;
+[out:json][timeout:25][maxsize:1073741824];
+(
+  ${parts.map(p=>`${p}(newer:"${t}")(${bbox()});`).join("\n")}
+);
+out body;>;out skel qt;
   `;
 }
 
@@ -210,10 +210,20 @@ function clearMap(){
 }
 
 function runQuery(){
+  // 🔹 Zoom-in check
+  const bounds = map.getBounds();
+  if(bounds.getNorth()-bounds.getSouth() > 0.5 || bounds.getEast()-bounds.getWest() > 0.5){
+    alert("Please zoom in closer before running a query (smaller area).");
+    return;
+  }
+
   clearMap();
   showLoader();
 
-  fetch("https://overpass-api.de/api/interpreter",{
+  // 🔹 Debug query in console
+  console.log(buildQuery());
+
+  fetch("https://overpass.kumi.systems/api/interpreter", {
     method:"POST",
     body:buildQuery()
   })
@@ -268,7 +278,7 @@ function runQuery(){
   })
   .catch(err=>{
     console.error(err);
-    alert("Error loading data");
+    alert("Error loading data. Check console for details.");
     hideLoader();
   });
 }
