@@ -137,7 +137,6 @@ map.addControl(new maplibregl.NavigationControl());
 
 let currentData=null;
 
-/* Loader Controls */
 function showLoader(){ document.getElementById("loader").style.display="flex"; }
 function hideLoader(){ document.getElementById("loader").style.display="none"; }
 
@@ -206,7 +205,6 @@ function clearMap(){
   count.innerText=0;
 }
 
-// Overpass endpoints fallback list
 const overpassEndpoints = [
   "https://lz4.overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter"
@@ -230,15 +228,23 @@ async function runQuery(){
         method:"POST",
         body:buildQuery()
       });
+
+      const contentType = res.headers.get("content-type");
+      if(!contentType || !contentType.includes("json")){
+        console.warn(`Endpoint ${endpoint} returned non-JSON: ${contentType}`);
+        continue;
+      }
+
       data = await res.json();
       if(data) break;
+
     } catch(e){
-      console.warn(`Failed endpoint ${endpoint}, trying next...`);
+      console.warn(`Failed endpoint ${endpoint}: ${e}`);
     }
   }
 
   if(!data){
-    alert("All Overpass endpoints failed. Try zooming in or try later.");
+    alert("All Overpass endpoints failed or returned invalid data. Try zooming in or later.");
     hideLoader();
     return;
   }
