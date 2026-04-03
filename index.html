@@ -6,7 +6,8 @@
 
 <link href="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.css" rel="stylesheet"/>
 <script src="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.js"></script>
-<script src="https://unpkg.com/osmtogeojson@3.0.0/osmtogeojson.js"></script>
+<!-- ✅ Correct osmtogeojson CDN -->
+<script src="https://unpkg.com/osmtogeojson@3.0.0/dist/osmtogeojson.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
 <style>
@@ -25,7 +26,7 @@ input, select, button {
 button { background:#2ecc71; color:#fff; cursor:pointer;}
 button:hover { background:#27ae60;}
 
-.stat { background:#222; padding:8px; margin-top:10px; }
+.stat { background:#222; padding:8px; margin-top:10px }
 
 /* 🔄 LOADER */
 #loader {
@@ -169,13 +170,12 @@ function buildQuery(){
   if(oneway.checked) parts.push(`way["oneway"="yes"]`);
   if(speed.checked) parts.push(`way["maxspeed"]`);
   if(restriction.checked) parts.push(`relation["restriction"]`);
-
   if(street.value) parts.push(`way["name"~"${street.value}",i]`);
   if(highway.value) parts.push(`way["highway"="${highway.value}"]`);
+  if(access.value) parts.push(`way["${access.value}"!="no"]`);
 
-  if(access.value){
-    parts.push(`way["${access.value}"!="no"]`);
-  }
+  // ✅ default if no filters
+  if(parts.length===0) parts.push(`way["highway"]`);
 
   return `
   [out:json][timeout:25];
