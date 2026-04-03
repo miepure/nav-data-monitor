@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Nav Data Monitor PRO</title>
+
+<link href="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.css" rel="stylesheet"/>
+<script src="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/osmtogeojson@3.0.0/osmtogeojson.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+<style>
+body { margin:0; display:flex; height:100vh; font-family:Arial; }
+#sidebar { width:340px; background:#111; color:#fff; padding:15px; overflow:auto;}
+#map { flex:1; }
+input, select, button { width:100%; margin:5px 0; padding:8px; border-radius:4px; border:none;}
+button { background:#2ecc71; color:#fff; cursor:pointer;}
+button:hover { background:#27ae60;}
+.stat { background:#222; padding:8px; margin-top:10px;}
+</style>
+</head>
+
+<body>
+
+<div id="sidebar">
+<h2>Nav Monitor PRO</h2>
+
+<input id="search" placeholder="City or lon,lat"/>
+<button onclick="searchLocation()">Search</button>
+
+<h3>Core Filters</h3>
+<label><input type="checkbox" id="oneway"> Oneway</label><br>
+<label><input type="checkbox" id="speed"> Speed Limits</label><br>
+<label><input type="checkbox" id="restriction"> Turn Restrictions</label><br>
+
+<input id="street" placeholder="Street name"/>
+<input id="highway" placeholder="Highway type (primary, residential...)"/>
+
+<h3>Access Filters</h3>
+<select id="access">
+<option value="">Any</option>
+<option value="motorcycle">2W (Motorcycle)</option>
+<option value="motorcar">4W (Car)</option>
+</select>
+
+<h3>Geometry Filter</h3>
+<select id="geometry">
+<option value="">Any</option>
+<option value="short">Short roads</option>
+<option value="long">Long roads</option>
+</select>
+
+<h3>Time</h3>
+<select id="time">
+<option value="1">1h</option>
+<option value="24">1d</option>
+<option value="168">7d</option>
+<option value="720">30d</option>
+</select>
+
+<h3>View Mode</h3>
+<select id="mode">
+<option value="geometry">Geometry</option>
+<option value="heat">Heatmap</option>
+<option value="cluster">Cluster</option>
+</select>
+
+<button onclick="runQuery()">Run</button>
+<button onclick="clearMap()">Clear</button>
+<button onclick="exportGeoJSON()">Export</button>
+<button onclick="locateMe()">Locate Me</button>
+
+<div class="stat">Edits: <span id="count">0</span></div>
+</div>
+
+<div id="map"></div>
+
+<script>
+const map = new maplibregl.Map({
+  container:'map',
+  style:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  center:[23.6,46.77],
+  zoom:12
+});
+
+map.addControl(new maplibregl.NavigationControl());
+
+let currentData=null;
+
+function searchLocation(){
+  const q=search.value;
+  if(q.includes(",")){
+    const [lon,lat]=q.split(",");
+    map.flyTo({center:[+lon,+lat],zoom:14});
+    return;
+  }
+  fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${q}`)
+  .then(r=>r.json())
+  .then(d=>{
+    if(d.length){
+      map.flyTo({center:[+d[0].lon,+d[0].lat],zoom:13});
+    }
+  });
+}
+
+function bbox(){
+  const b=map.getBounds();
+  return `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
+}
+
+function buildQuery(){
+  let parts=[];
+  const t=new Date(Date.now()-time.value*3600000).toISOString();
+
+  if(oneway.checked) parts.push(`way["oneway"="yes"]`);
+  if(speed.checked) parts.push(`way["maxspeed"]`);
+  if(restriction.checked) parts.push(`relation["restriction"]`);
+
+  if(street.value) parts.push(`way["name"~"${street.value}",i]`);
+  if(highway.value) parts.push(`way["highway"="${highway.value}"]`);
+
+  if(access.value){
+    parts.push(`way["${access.value}"!="no"]`);
+  }
+
+  return `
+  [out:json][timeout:25];
+  (
+    ${parts.map(p=>`${p}(newer:"${t}")(${bbox()});`).join("\n")}
+  );
+  out body;>;out skel qt;
+  `;
+}
+
+function applyGeometryFilter(geo){
+  if(!geometry.value) return geo;
+
+  return {
+    type:"FeatureCollection",
+    features:geo.features.filter(f=>{
+      if(!f.geometry) return false;
+      const len=turf.length(f,{units:'kilometers'});
+
+      if(geometry.value==="short") return len<0.5;
+      if(geometry.value==="long") return len>1;
+
+      return true;
+    })
+  };
+}
+
+function clearMap(){
+  ["data","heat","cluster","points"].forEach(id=>{
+    if(map.getLayer(id)) map.removeLayer(id);
+    if(map.getSource(id)) map.removeSource(id);
+  });
+  count.innerText=0;
+}
+
+function runQuery(){
+  clearMap();
+
+  fetch("https://overpass-api.de/api/interpreter",{
+    method:"POST",
+    body:buildQuery()
+  })
+  .then(r=>r.json())
+  .then(data=>{
+    let geo=osmtogeojson(data);
+
+    geo=applyGeometryFilter(geo);
+    currentData=geo;
+
+    count.innerText=data.elements.length;
+
+    const modeVal=mode.value;
+
+    map.addSource("data",{type:"geojson",data:geo});
+
+    if(modeVal==="geometry"){
+      map.addLayer({
+        id:"data",
+        type:"line",
+        source:"data",
+        paint:{'line-color':'#ff5500','line-width':2}
+      });
+    }
+
+    if(modeVal==="heat"){
+      map.addLayer({
+        id:"heat",
+        type:"heatmap",
+        source:"data",
+        paint:{
+          'heatmap-weight':1,
+          'heatmap-intensity':1,
+          'heatmap-radius':15
+        }
+      });
+    }
+
+    if(modeVal==="cluster"){
+      map.addSource("points",{
+        type:"geojson",
+        data:toPoints(geo),
+        cluster:true,
+        clusterRadius:50
+      });
+
+      map.addLayer({
+        id:"cluster",
+        type:"circle",
+        source:"points",
+        filter:["has","point_count"],
+        paint:{'circle-color':'#00ffff','circle-radius':18}
+      });
+    }
+
+    addClick();
+  });
+}
+
+function toPoints(geo){
+  return {
+    type:"FeatureCollection",
+    features:geo.features.map(f=>turf.centroid(f))
+  };
+}
+
+function addClick(){
+  map.on("click",(e)=>{
+    const f=map.queryRenderedFeatures(e.point)[0];
+    if(!f) return;
+
+    const id=f.id || (f.properties && f.properties.id);
+    const url=`https://www.openstreetmap.org/${id}`;
+
+    new maplibregl.Popup()
+      .setLngLat(e.lngLat)
+      .setHTML(`<a href="${url}" target="_blank">Open in OSM</a>`)
+      .addTo(map);
+  });
+}
+
+function exportGeoJSON(){
+  if(!currentData) return;
+  const blob=new Blob([JSON.stringify(currentData)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="nav_data.geojson";
+  a.click();
+}
+
+function locateMe(){
+  navigator.geolocation.getCurrentPosition(p=>{
+    map.flyTo({center:[p.coords.longitude,p.coords.latitude],zoom:14});
+  });
+}
+</script>
+
+</body>
+</html>
