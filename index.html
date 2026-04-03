@@ -13,10 +13,54 @@
 body { margin:0; display:flex; height:100vh; font-family:Arial; }
 #sidebar { width:340px; background:#111; color:#fff; padding:15px; overflow:auto;}
 #map { flex:1; }
-input, select, button { width:100%; margin:5px 0; padding:8px; border-radius:4px; border:none;}
+
+input, select, button {
+  width:100%;
+  margin:5px 0;
+  padding:8px;
+  border-radius:4px;
+  border:none;
+}
+
 button { background:#2ecc71; color:#fff; cursor:pointer;}
 button:hover { background:#27ae60;}
-.stat { background:#222; padding:8px; margin-top:10px;}
+
+.stat { background:#222; padding:8px; margin-top:10px; }
+
+/* 🔄 LOADER */
+#loader {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.85);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  z-index: 9999;
+}
+
+.spinner {
+  border: 6px solid #333;
+  border-top: 6px solid #2ecc71;
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  animation: spin 1s linear infinite;
+}
+
+.loading-text {
+  color: #fff;
+  margin-top: 15px;
+  font-size: 16px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg);}
+  100% { transform: rotate(360deg);}
+}
 </style>
 </head>
 
@@ -34,7 +78,7 @@ button:hover { background:#27ae60;}
 <label><input type="checkbox" id="restriction"> Turn Restrictions</label><br>
 
 <input id="street" placeholder="Street name"/>
-<input id="highway" placeholder="Highway type (primary, residential...)"/>
+<input id="highway" placeholder="Highway type"/>
 
 <h3>Access Filters</h3>
 <select id="access">
@@ -75,6 +119,12 @@ button:hover { background:#27ae60;}
 
 <div id="map"></div>
 
+<!-- 🔄 LOADER -->
+<div id="loader">
+  <div class="spinner"></div>
+  <div class="loading-text">Loading OSM data...</div>
+</div>
+
 <script>
 const map = new maplibregl.Map({
   container:'map',
@@ -86,6 +136,10 @@ const map = new maplibregl.Map({
 map.addControl(new maplibregl.NavigationControl());
 
 let currentData=null;
+
+/* 🔄 Loader Controls */
+function showLoader(){ document.getElementById("loader").style.display="flex"; }
+function hideLoader(){ document.getElementById("loader").style.display="none"; }
 
 function searchLocation(){
   const q=search.value;
@@ -140,10 +194,8 @@ function applyGeometryFilter(geo){
     features:geo.features.filter(f=>{
       if(!f.geometry) return false;
       const len=turf.length(f,{units:'kilometers'});
-
       if(geometry.value==="short") return len<0.5;
       if(geometry.value==="long") return len>1;
-
       return true;
     })
   };
@@ -159,6 +211,7 @@ function clearMap(){
 
 function runQuery(){
   clearMap();
+  showLoader();
 
   fetch("https://overpass-api.de/api/interpreter",{
     method:"POST",
@@ -167,12 +220,10 @@ function runQuery(){
   .then(r=>r.json())
   .then(data=>{
     let geo=osmtogeojson(data);
-
     geo=applyGeometryFilter(geo);
     currentData=geo;
 
     count.innerText=data.elements.length;
-
     const modeVal=mode.value;
 
     map.addSource("data",{type:"geojson",data:geo});
@@ -191,11 +242,7 @@ function runQuery(){
         id:"heat",
         type:"heatmap",
         source:"data",
-        paint:{
-          'heatmap-weight':1,
-          'heatmap-intensity':1,
-          'heatmap-radius':15
-        }
+        paint:{'heatmap-radius':15}
       });
     }
 
@@ -217,6 +264,12 @@ function runQuery(){
     }
 
     addClick();
+    hideLoader();
+  })
+  .catch(err=>{
+    console.error(err);
+    alert("Error loading data");
+    hideLoader();
   });
 }
 
