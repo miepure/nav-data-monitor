@@ -74,8 +74,8 @@ button:hover { background:#27ae60;}
 
 <h3>Overpass Provider</h3>
 <select id="providerSelect">
-<option value="https://lz4.overpass-api.de/api/interpreter">lz4.overpass-api.de</option>
-<option value="https://overpass.kumi.systems/api/interpreter">kumi.systems</option>
+  <option value="https://overpass-api.de/api/interpreter">overpass-api.de</option>
+  <option value="https://overpass.private.coffee/api/interpreter">private.coffee</option>
 </select>
 
 <h3>Core Filters</h3>
@@ -227,6 +227,8 @@ async function runQuery(){
 
   const primaryEndpoint = providerSelect.value;
   const fallbackEndpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
     "https://lz4.overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.openstreetmap.ru/api/interpreter"
