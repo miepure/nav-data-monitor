@@ -2,11 +2,10 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<title>nav-data-monitor</title>
+<title>Nav Data Monitor PRO</title>
 
 <link href="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.css" rel="stylesheet"/>
 <script src="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.js"></script>
-<!-- ✅ Correct osmtogeojson CDN -->
 <script src="https://unpkg.com/osmtogeojson@3.0.0/dist/osmtogeojson.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
@@ -28,7 +27,7 @@ button:hover { background:#27ae60;}
 
 .stat { background:#222; padding:8px; margin-top:10px }
 
-/* 🔄 LOADER */
+/* Loader */
 #loader {
   position: fixed;
   top: 0;
@@ -120,7 +119,7 @@ button:hover { background:#27ae60;}
 
 <div id="map"></div>
 
-<!-- 🔄 LOADER -->
+<!-- Loader -->
 <div id="loader">
   <div class="spinner"></div>
   <div class="loading-text">Loading OSM data...</div>
@@ -138,7 +137,7 @@ map.addControl(new maplibregl.NavigationControl());
 
 let currentData=null;
 
-/* 🔄 Loader Controls */
+/* Loader Controls */
 function showLoader(){ document.getElementById("loader").style.display="flex"; }
 function hideLoader(){ document.getElementById("loader").style.display="none"; }
 
@@ -174,7 +173,6 @@ function buildQuery(){
   if(highway.value) parts.push(`way["highway"="${highway.value}"]`);
   if(access.value) parts.push(`way["${access.value}"!="no"]`);
 
-  // ✅ default if no filters
   if(parts.length===0) parts.push(`way["highway"]`);
 
   return `
@@ -188,7 +186,6 @@ out body;>;out skel qt;
 
 function applyGeometryFilter(geo){
   if(!geometry.value) return geo;
-
   return {
     type:"FeatureCollection",
     features:geo.features.filter(f=>{
@@ -209,8 +206,13 @@ function clearMap(){
   count.innerText=0;
 }
 
-function runQuery(){
-  // 🔹 Zoom-in check
+// Overpass endpoints fallback list
+const overpassEndpoints = [
+  "https://lz4.overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter"
+];
+
+async function runQuery(){
   const bounds = map.getBounds();
   if(bounds.getNorth()-bounds.getSouth() > 0.5 || bounds.getEast()-bounds.getWest() > 0.5){
     alert("Please zoom in closer before running a query (smaller area).");
@@ -219,89 +221,65 @@ function runQuery(){
 
   clearMap();
   showLoader();
-
-  // 🔹 Debug query in console
   console.log(buildQuery());
 
-  fetch("https://overpass.kumi.systems/api/interpreter", {
-    method:"POST",
-    body:buildQuery()
-  })
-  .then(r=>r.json())
-  .then(data=>{
-    let geo=osmtogeojson(data);
-    geo=applyGeometryFilter(geo);
-    currentData=geo;
-
-    count.innerText=data.elements.length;
-    const modeVal=mode.value;
-
-    map.addSource("data",{type:"geojson",data:geo});
-
-    if(modeVal==="geometry"){
-      map.addLayer({
-        id:"data",
-        type:"line",
-        source:"data",
-        paint:{'line-color':'#ff5500','line-width':2}
+  let data=null;
+  for(let endpoint of overpassEndpoints){
+    try{
+      const res = await fetch(endpoint,{
+        method:"POST",
+        body:buildQuery()
       });
+      data = await res.json();
+      if(data) break;
+    } catch(e){
+      console.warn(`Failed endpoint ${endpoint}, trying next...`);
     }
+  }
 
-    if(modeVal==="heat"){
-      map.addLayer({
-        id:"heat",
-        type:"heatmap",
-        source:"data",
-        paint:{'heatmap-radius':15}
-      });
-    }
-
-    if(modeVal==="cluster"){
-      map.addSource("points",{
-        type:"geojson",
-        data:toPoints(geo),
-        cluster:true,
-        clusterRadius:50
-      });
-
-      map.addLayer({
-        id:"cluster",
-        type:"circle",
-        source:"points",
-        filter:["has","point_count"],
-        paint:{'circle-color':'#00ffff','circle-radius':18}
-      });
-    }
-
-    addClick();
+  if(!data){
+    alert("All Overpass endpoints failed. Try zooming in or try later.");
     hideLoader();
-  })
-  .catch(err=>{
-    console.error(err);
-    alert("Error loading data. Check console for details.");
-    hideLoader();
-  });
+    return;
+  }
+
+  let geo=osmtogeojson(data);
+  geo=applyGeometryFilter(geo);
+  currentData=geo;
+
+  count.innerText=data.elements.length;
+  const modeVal=mode.value;
+
+  map.addSource("data",{type:"geojson",data:geo});
+
+  if(modeVal==="geometry"){
+    map.addLayer({id:"data", type:"line", source:"data", paint:{'line-color':'#ff5500','line-width':2}});
+  }
+
+  if(modeVal==="heat"){
+    map.addLayer({id:"heat", type:"heatmap", source:"data", paint:{'heatmap-radius':15}});
+  }
+
+  if(modeVal==="cluster"){
+    map.addSource("points",{type:"geojson", data:toPoints(geo), cluster:true, clusterRadius:50});
+    map.addLayer({id:"cluster", type:"circle", source:"points", filter:["has","point_count"], paint:{'circle-color':'#00ffff','circle-radius':18}});
+  }
+
+  addClick();
+  hideLoader();
 }
 
 function toPoints(geo){
-  return {
-    type:"FeatureCollection",
-    features:geo.features.map(f=>turf.centroid(f))
-  };
+  return {type:"FeatureCollection", features:geo.features.map(f=>turf.centroid(f))};
 }
 
 function addClick(){
   map.on("click",(e)=>{
     const f=map.queryRenderedFeatures(e.point)[0];
     if(!f) return;
-
     const id=f.id || (f.properties && f.properties.id);
     const url=`https://www.openstreetmap.org/${id}`;
-
-    new maplibregl.Popup()
-      .setLngLat(e.lngLat)
-      .setHTML(`<a href="${url}" target="_blank">Open in OSM</a>`)
-      .addTo(map);
+    new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<a href="${url}" target="_blank">Open in OSM</a>`).addTo(map);
   });
 }
 
